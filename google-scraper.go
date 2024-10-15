@@ -6,16 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 )
 
-const apiKey = "custom json search api key goes here"
-const cx = "project cx key goes here"
-const queriesPerMinute = 50 // adjust based off your google limits
+const apiKey = "key"
+const cx = "key"
+const queriesPerMinute = 100
 const intervalBetweenQueries = time.Minute / queriesPerMinute
 
 // domains which will be blacklisted in results
@@ -98,10 +97,26 @@ func googleSearch(query, outputFile string) error {
 	defer file.Close()
 
 	retryCount := 0
-	const maxRetries = 3
-	backoffTime := 5 * time.Second
+	const maxRetries = 5
+	const maxResults = 100
+	const queriesPerMinuteLimit = 100
+	const waitTime = time.Minute
+	queryCount := 0
+	fetchedResults := 0
+	queryStartTime := time.Now()
 
-	for {
+	for fetchedResults < maxResults {
+		if queryCount >= queriesPerMinuteLimit {
+			timeSinceStart := time.Since(queryStartTime)
+			if timeSinceStart < time.Minute {
+				sleepTime := time.Minute - timeSinceStart
+				fmt.Printf("Reached query limit (%d queries/minute). Waiting %s before next query...\n", queriesPerMinuteLimit, sleepTime)
+				time.Sleep(sleepTime)
+			}
+			queryStartTime = time.Now()
+			queryCount = 0
+		}
+
 		url := fmt.Sprintf("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&start=%d&num=10", apiKey, cx, query, startIndex)
 
 		resp, err := http.Get(url)
@@ -112,7 +127,6 @@ func googleSearch(query, outputFile string) error {
 
 		if resp.StatusCode == http.StatusOK {
 			retryCount = 0
-			backoffTime = 5 * time.Second
 		} else if resp.StatusCode == http.StatusBadRequest {
 			retryCount++
 			if retryCount > maxRetries {
@@ -123,18 +137,14 @@ func googleSearch(query, outputFile string) error {
 			time.Sleep(2 * time.Second)
 			continue
 		} else if resp.StatusCode == http.StatusTooManyRequests {
-			fmt.Printf("Received 429 Too Many Requests. Waiting for %s before retrying...\n", backoffTime)
-			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-			time.Sleep(backoffTime + jitter)
-			backoffTime *= 2
-			if backoffTime > 80*time.Second {
-				fmt.Printf("Exceeded maximum wait time for query: %s\n", query)
-				os.Exit(1)
-			}
+			fmt.Println("Received 429 Too Many Requests, waiting 1 minute...")
+			time.Sleep(1 * time.Minute)
 			continue
 		} else {
 			return fmt.Errorf("unexpected response status: %s", resp.Status)
 		}
+
+		queryCount++
 
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
@@ -155,18 +165,24 @@ func googleSearch(query, outputFile string) error {
 				if _, err := file.WriteString(item.Link + "\n"); err != nil {
 					return fmt.Errorf("failed to write to output file: %w", err)
 				}
+				fetchedResults++
+				if fetchedResults >= maxResults {
+					fmt.Printf("Reached the maximum limit of %d results.\n", maxResults)
+					return nil
+				}
 			}
 		}
 
-		if len(result.Queries.NextPage) == 0 {
+		if len(result.Queries.NextPage) > 0 {
+			startIndex = result.Queries.NextPage[0].StartIndex
+		} else {
 			break
 		}
-
-		startIndex = result.Queries.NextPage[0].StartIndex
 
 		time.Sleep(intervalBetweenQueries)
 	}
 
+	fmt.Printf("Fetched %d results in total.\n", fetchedResults)
 	return nil
 }
 

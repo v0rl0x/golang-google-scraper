@@ -68,14 +68,14 @@ var blacklist = []string{
 }
 
 type SearchResult struct {
-	Items []struct {
-		Link string `json:"link"`
-	} `json:"items"`
-	Queries struct {
-		NextPage []struct {
-			StartIndex int `json:"startIndex"`
-		} `json:"nextPage"`
-	} `json:"queries"`
+    Items []struct {
+        Link string `json:"link"`
+    } `json:"items"`
+    Queries struct {
+        NextPage []struct {
+            StartIndex int `json:"startIndex"`
+        } `json:"nextPage"`
+    } `json:"queries"`
 }
 
 func isBlacklisted(url string) bool {
@@ -97,7 +97,7 @@ func googleSearch(query, outputFile string) error {
 	defer file.Close()
 
 	retryCount := 0
-	const maxRetries = 5
+	const maxRetries = 3
 	const maxResults = 100
 	const queriesPerMinuteLimit = 100
 	const waitTime = time.Minute
